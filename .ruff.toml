@@ -1,0 +1,19 @@
+line-length = 79
+exclude = [".venv/"]
+
+[lint]
+extend-select = ["I", "E", "W", "F", "C", "D202", "ERA"]
+preview = true
+
+[lint.isort]
+combine-as-imports = true
+order-by-type = false
+
+[lint.flake8-quotes]
+inline-quotes = "single"
+
+[lint.pydocstyle]
+convention = "google"
+
+[format]
+quote-style = "single"
