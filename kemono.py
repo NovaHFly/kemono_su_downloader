@@ -1,8 +1,8 @@
 import argparse
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache, wraps
-from pprint import pprint
+from pathlib import Path
 from typing import Callable, Iterable, ParamSpec, TypeVar
 
 import httpx
@@ -22,12 +22,14 @@ T = TypeVar('T')
 Decorator = Callable[[Callable[P, T]], Callable[P, T]]
 ExceptionGroup = tuple[Exception, ...]
 
+DEFAULT_DOWNLOADS_PATH = Path('downloads')
+
 
 @dataclass
 class Creator:
-    id: str
+    id: str = field(repr=False)
     name: str
-    service: str
+    service: str = field(repr=False)
 
     @classmethod
     def from_json(cls, json: dict[str, str]) -> 'Creator':
@@ -51,10 +53,11 @@ class KemonoAttachment:
 
 @dataclass
 class KemonoPost:
-    id: str
+    id: str = field(repr=False)
     title: str
-    pictures: Iterable[KemonoAttachment]
-    file_attachments: Iterable[KemonoAttachment]
+    pictures: Iterable[KemonoAttachment] = field(repr=False)
+    file_attachments: Iterable[KemonoAttachment] = field(repr=False)
+    creator: Creator
 
     @classmethod
     def from_json(cls, json: dict[str, str]) -> 'KemonoPost':
@@ -66,12 +69,17 @@ class KemonoPost:
             KemonoAttachment.from_json(attachment_json)
             for attachment_json in json['attachments']
         ]
+        creator = get_creator_data(
+            creator_id=json['post']['user'],
+            service=json['post']['service'],
+        )
 
         return cls(
             id=json['post']['id'],
             title=json['post']['title'],
             pictures=pictures,
             file_attachments=file_attachments,
+            creator=creator,
         )
 
 
@@ -113,9 +121,7 @@ def log_errors(
 
 @log_errors
 @cache
-@tenacity.retry(
-    stop=tenacity.stop_after_attempt(5),
-)
+@tenacity.retry(stop=tenacity.stop_after_attempt(5))
 def get_creator_data(
     creator_id: str,
     service: str,
@@ -130,9 +136,7 @@ def get_creator_data(
 
 
 @log_errors
-@tenacity.retry(
-    stop=tenacity.stop_after_attempt(5),
-)
+@tenacity.retry(stop=tenacity.stop_after_attempt(5))
 def get_post_data(
     service: str,
     creator_id: str,
@@ -147,14 +151,59 @@ def get_post_data(
     )
 
 
+@log_errors
+@tenacity.retry(stop=tenacity.stop_after_attempt(5))
+def download_file(
+    attachment: KemonoAttachment,
+    downloads_folder: Path = DEFAULT_DOWNLOADS_PATH,
+    file_name: str | None = None,
+) -> None:
+    if not file_name:
+        file_name = attachment.name
+    file_path = downloads_folder / file_name
+
+    logging.info(f'{attachment} submitted for download')
+
+    res = httpx.get(
+        attachment.server + '/data' + attachment.path
+    ).raise_for_status()
+
+    with file_path.open('wb') as f:
+        f.write(res.content)
+
+    logging.info(f'{attachment}: download completed')
+
+
+def download_post(
+    post: KemonoPost,
+) -> None:
+    folder_name = f'[{post.creator.name}] {post.title} ({post.id})'
+    folder_path = DEFAULT_DOWNLOADS_PATH / folder_name
+    folder_path.mkdir(exist_ok=True, parents=True)
+
+    logging.info(f'{post} submitted for download')
+
+    for i, attachment in enumerate(post.pictures, start=1):
+        download_file(
+            attachment,
+            downloads_folder=folder_path,
+            file_name=f'{i}.{attachment.name.rsplit(".", maxsplit=1)[-1]}',
+        )
+
+    for attachment in post.file_attachments:
+        download_file(
+            attachment,
+            downloads_folder=folder_path,
+        )
+
+    logging.info(f'{post}: download completed')
+
+
 def main_cli() -> None:
     args = construct_argparser().parse_args()
     for url in args.URLS:
         service, creator_id, post_id = url.split('/')[3::2]
-        post_data = get_post_data(service, creator_id, post_id)
-        creator_data = get_creator_data(creator_id, service)
-        pprint(creator_data)
-        pprint(post_data)
+        download_post(get_post_data(service, creator_id, post_id))
         print('--------')
 
 
