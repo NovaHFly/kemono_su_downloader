@@ -1,7 +1,7 @@
 import argparse
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import cache, wraps
 from pathlib import Path
@@ -224,34 +224,11 @@ def download_file(
     return file_path
 
 
-@log_time
-def main_cli() -> None:
-    args = construct_argparser().parse_args()
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        post_fetch_tasks = [
-            executor.submit(get_post_data, *url.split('/')[3::2])
-            for url in args.URLS
-        ]
-
-        post_attachments = sum(
-            (
-                [*post.pictures, *post.file_attachments]
-                for post in (task.result() for task in post_fetch_tasks)
-            ),
-            start=[],
-        )
-
-        attachment_download_tasks = [
-            executor.submit(download_file, attachment)
-            for attachment in post_attachments
-        ]
-
-        wait(attachment_download_tasks)
-
-    total_files_submitted = len(attachment_download_tasks)
+def summarize_download(download_tasks: list[Future[Path]]) -> None:
+    total_files_submitted = len(download_tasks)
 
     successful_downloads = [
-        task for task in attachment_download_tasks if not task.exception()
+        task for task in download_tasks if not task.exception()
     ]
     total_files_downloaded = len(successful_downloads)
 
@@ -259,11 +236,30 @@ def main_cli() -> None:
         task.result().stat().st_size for task in successful_downloads
     )
     logging.info(
-        f'Downloaded {total_files_downloaded} out of {total_files_submitted}'
+        f'Downloaded {total_files_downloaded} out of'
+        f' {total_files_submitted} files.'
     )
     logging.info(
         f'Total download size: {total_file_size / 1024 / 1024:.2f} MB'
     )
+
+
+def download_posts(urls: list[str]) -> Iterable[Future[Path]]:
+    posts = (get_post_data(*url.split('/')[3::2]) for url in urls)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        attachment_download_tasks = [
+            executor.submit(download_file, attachment)
+            for post in posts
+            for attachment in (*post.pictures, *post.file_attachments)
+        ]
+
+        return attachment_download_tasks
+
+
+@log_time
+def main_cli() -> None:
+    args = construct_argparser().parse_args()
+    summarize_download(download_posts(args.URLS))
 
 
 if __name__ == '__main__':
