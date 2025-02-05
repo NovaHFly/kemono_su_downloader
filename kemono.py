@@ -44,18 +44,25 @@ class KemonoAttachment:
     path: str = field(repr=False)
     server: str = field(repr=False)
     filename: str
+    parent_path: Path = field(repr=False)
 
     @classmethod
     def from_json(
-        cls, json: dict[str, str], filename: str = None
+        cls,
+        json: dict[str, str],
+        filename: str = None,
+        folder_path: Path = None,
     ) -> 'KemonoAttachment':
         if not filename:
             filename = json['name']
+        if not folder_path:
+            folder_path = DEFAULT_DOWNLOADS_PATH
         return cls(
             name=json['name'],
             path=json['path'],
             server=json['server'],
             filename=filename,
+            parent_path=folder_path,
         )
 
 
@@ -65,10 +72,22 @@ class KemonoPost:
     title: str
     pictures: Iterable[KemonoAttachment] = field(repr=False)
     file_attachments: Iterable[KemonoAttachment] = field(repr=False)
+    folder_path: Path = field(repr=False)
     creator: Creator
 
     @classmethod
     def from_json(cls, json: dict[str, str]) -> 'KemonoPost':
+        creator = get_creator_data(
+            creator_id=json['post']['user'],
+            service=json['post']['service'],
+        )
+        post_id = json['post']['id']
+        title = json['post']['title']
+
+        folder_path = (
+            DEFAULT_DOWNLOADS_PATH / f'[{creator.name}] {title} ({post_id})'
+        )
+
         pictures = [
             KemonoAttachment.from_json(
                 picture_json,
@@ -76,19 +95,18 @@ class KemonoPost:
                     f'{picture_number}'
                     f'.{picture_json["path"].rsplit(".", maxsplit=1)[-1]}'
                 ),
+                folder_path=folder_path,
             )
             for picture_number, picture_json in enumerate(
                 json['previews'], start=1
             )
         ]
         file_attachments = [
-            KemonoAttachment.from_json(attachment_json)
+            KemonoAttachment.from_json(
+                attachment_json, folder_path=folder_path
+            )
             for attachment_json in json['attachments']
         ]
-        creator = get_creator_data(
-            creator_id=json['post']['user'],
-            service=json['post']['service'],
-        )
 
         return cls(
             id=json['post']['id'],
@@ -96,6 +114,7 @@ class KemonoPost:
             pictures=pictures,
             file_attachments=file_attachments,
             creator=creator,
+            folder_path=folder_path,
         )
 
 
@@ -187,9 +206,9 @@ def get_post_data(
 @tenacity.retry(stop=tenacity.stop_after_attempt(5))
 def download_file(
     attachment: KemonoAttachment,
-    downloads_folder: Path = DEFAULT_DOWNLOADS_PATH,
-) -> None:
-    file_path = downloads_folder / attachment.filename
+) -> Path:
+    file_path = attachment.parent_path / attachment.filename
+    file_path.parent.mkdir(exist_ok=True, parents=True)
 
     logging.info(f'{attachment} submitted for download')
 
@@ -202,6 +221,7 @@ def download_file(
 
     logging.info(f'{attachment}: download completed')
 
+    return file_path
 
 def download_post(
     post: KemonoPost,
