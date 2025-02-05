@@ -1,5 +1,6 @@
 import argparse
 import logging
+import time
 from dataclasses import dataclass, field
 from functools import cache, wraps
 from itertools import chain
@@ -134,6 +135,22 @@ def log_errors(
     return decorator
 
 
+def log_time(func: Callable[P, T]) -> Callable[P, T]:
+    """Decorator to log real time elapsed by function."""
+
+    @wraps(func)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        logging.info(
+            f'{func.__name__} took {end_time - start_time:.2f} seconds'
+        )
+        return result
+
+    return wrapper
+
+
 @log_errors
 @cache
 @tenacity.retry(stop=tenacity.stop_after_attempt(5))
@@ -204,6 +221,7 @@ def download_post(
     logging.info(f'{post}: download completed')
 
 
+@log_time
 def main_cli() -> None:
     args = construct_argparser().parse_args()
     for url in args.URLS:
