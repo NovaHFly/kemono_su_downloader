@@ -25,6 +25,7 @@ Decorator = Callable[[Callable[P, T]], Callable[P, T]]
 ExceptionGroup = tuple[Exception, ...]
 
 DEFAULT_DOWNLOADS_PATH = Path('downloads')
+DEFAULT_THREAD_COUNT = 5
 
 
 @dataclass
@@ -121,6 +122,13 @@ class KemonoPost:
 def construct_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument('URLS', help='kemono.su urls', nargs='+')
+    parser.add_argument(
+        '--threads',
+        '-t',
+        type=int,
+        default=DEFAULT_THREAD_COUNT,
+        help='Max number of threads to use',
+    )
     return parser
 
 
@@ -244,9 +252,12 @@ def summarize_download(download_tasks: list[Future[Path]]) -> None:
     )
 
 
-def download_posts(urls: list[str]) -> Iterable[Future[Path]]:
+def download_posts(
+    urls: list[str],
+    thread_count: int = DEFAULT_THREAD_COUNT,
+) -> Iterable[Future[Path]]:
     posts = (get_post_data(*url.split('/')[3::2]) for url in urls)
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=thread_count) as executor:
         attachment_download_tasks = [
             executor.submit(download_file, attachment)
             for post in posts
@@ -259,7 +270,7 @@ def download_posts(urls: list[str]) -> Iterable[Future[Path]]:
 @log_time
 def main_cli() -> None:
     args = construct_argparser().parse_args()
-    summarize_download(download_posts(args.URLS))
+    summarize_download(download_posts(args.URLS, thread_count=args.threads))
 
 
 if __name__ == '__main__':
