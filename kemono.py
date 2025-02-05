@@ -2,6 +2,7 @@ import argparse
 import logging
 from dataclasses import dataclass, field
 from functools import cache, wraps
+from itertools import chain
 from pathlib import Path
 from typing import Callable, Iterable, ParamSpec, TypeVar
 
@@ -38,16 +39,22 @@ class Creator:
 
 @dataclass
 class KemonoAttachment:
-    name: str
-    path: str
-    server: str
+    name: str = field(repr=False)
+    path: str = field(repr=False)
+    server: str = field(repr=False)
+    filename: str
 
     @classmethod
-    def from_json(cls, json: dict[str, str]) -> 'KemonoAttachment':
+    def from_json(
+        cls, json: dict[str, str], filename: str = None
+    ) -> 'KemonoAttachment':
+        if not filename:
+            filename = json['name']
         return cls(
             name=json['name'],
             path=json['path'],
             server=json['server'],
+            filename=filename,
         )
 
 
@@ -62,8 +69,16 @@ class KemonoPost:
     @classmethod
     def from_json(cls, json: dict[str, str]) -> 'KemonoPost':
         pictures = [
-            KemonoAttachment.from_json(picture_json)
-            for picture_json in json['previews']
+            KemonoAttachment.from_json(
+                picture_json,
+                filename=(
+                    f'{picture_number}'
+                    f'.{picture_json["path"].rsplit(".", maxsplit=1)[-1]}'
+                ),
+            )
+            for picture_number, picture_json in enumerate(
+                json['previews'], start=1
+            )
         ]
         file_attachments = [
             KemonoAttachment.from_json(attachment_json)
@@ -156,11 +171,8 @@ def get_post_data(
 def download_file(
     attachment: KemonoAttachment,
     downloads_folder: Path = DEFAULT_DOWNLOADS_PATH,
-    file_name: str | None = None,
 ) -> None:
-    if not file_name:
-        file_name = attachment.name
-    file_path = downloads_folder / file_name
+    file_path = downloads_folder / attachment.filename
 
     logging.info(f'{attachment} submitted for download')
 
@@ -183,14 +195,7 @@ def download_post(
 
     logging.info(f'{post} submitted for download')
 
-    for i, attachment in enumerate(post.pictures, start=1):
-        download_file(
-            attachment,
-            downloads_folder=folder_path,
-            file_name=f'{i}.{attachment.name.rsplit(".", maxsplit=1)[-1]}',
-        )
-
-    for attachment in post.file_attachments:
+    for attachment in chain(post.pictures, post.file_attachments):
         download_file(
             attachment,
             downloads_folder=folder_path,
