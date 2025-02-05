@@ -1,9 +1,9 @@
 import argparse
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from functools import cache, wraps
-from itertools import chain
 from pathlib import Path
 from typing import Callable, Iterable, ParamSpec, TypeVar
 
@@ -223,31 +223,47 @@ def download_file(
 
     return file_path
 
-def download_post(
-    post: KemonoPost,
-) -> None:
-    folder_name = f'[{post.creator.name}] {post.title} ({post.id})'
-    folder_path = DEFAULT_DOWNLOADS_PATH / folder_name
-    folder_path.mkdir(exist_ok=True, parents=True)
-
-    logging.info(f'{post} submitted for download')
-
-    for attachment in chain(post.pictures, post.file_attachments):
-        download_file(
-            attachment,
-            downloads_folder=folder_path,
-        )
-
-    logging.info(f'{post}: download completed')
-
 
 @log_time
 def main_cli() -> None:
     args = construct_argparser().parse_args()
-    for url in args.URLS:
-        service, creator_id, post_id = url.split('/')[3::2]
-        download_post(get_post_data(service, creator_id, post_id))
-        print('--------')
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        post_fetch_tasks = [
+            executor.submit(get_post_data, *url.split('/')[3::2])
+            for url in args.URLS
+        ]
+
+        post_attachments = sum(
+            (
+                [*post.pictures, *post.file_attachments]
+                for post in (task.result() for task in post_fetch_tasks)
+            ),
+            start=[],
+        )
+
+        attachment_download_tasks = [
+            executor.submit(download_file, attachment)
+            for attachment in post_attachments
+        ]
+
+        wait(attachment_download_tasks)
+
+    total_files_submitted = len(attachment_download_tasks)
+
+    successful_downloads = [
+        task for task in attachment_download_tasks if not task.exception()
+    ]
+    total_files_downloaded = len(successful_downloads)
+
+    total_file_size = sum(
+        task.result().stat().st_size for task in successful_downloads
+    )
+    logging.info(
+        f'Downloaded {total_files_downloaded} out of {total_files_submitted}'
+    )
+    logging.info(
+        f'Total download size: {total_file_size / 1024 / 1024:.2f} MB'
+    )
 
 
 if __name__ == '__main__':
