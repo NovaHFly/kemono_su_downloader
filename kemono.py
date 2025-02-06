@@ -16,7 +16,7 @@ logging.basicConfig(
     filemode='a',
     format='%(asctime)s, %(levelname)s, %(message)s, %(name)s',
 )
-logging.getLogger().addHandler(logging.StreamHandler())
+logger = logging.getLogger(__name__)
 
 P = ParamSpec('P')
 T = TypeVar('T')
@@ -170,7 +170,7 @@ def log_time(func: Callable[P, T]) -> Callable[P, T]:
         start_time = time.time()
         result = func(*args, **kwargs)
         end_time = time.time()
-        logging.info(
+        logger.info(
             f'{func.__name__} took {end_time - start_time:.2f} seconds'
         )
         return result
@@ -224,7 +224,7 @@ def download_attachment(
     file_path = attachment.parent_path / attachment.filename
     file_path.parent.mkdir(exist_ok=True, parents=True)
 
-    logging.info(f'{attachment} submitted for download')
+    logger.info(f'{attachment} submitted for download')
 
     res = httpx.get(
         attachment.server + '/data' + attachment.path
@@ -233,7 +233,7 @@ def download_attachment(
     with file_path.open('wb') as f:
         f.write(res.content)
 
-    logging.info(f'{attachment}: download completed')
+    logger.info(f'{attachment}: download completed')
 
     return file_path
 
@@ -254,13 +254,11 @@ def summarize_download(download_tasks: list[Future[Path]]) -> None:
     total_file_size = sum(
         task.result().stat().st_size for task in successful_downloads
     )
-    logging.info(
+    logger.info(
         f'Downloaded {total_files_downloaded} out of'
         f' {total_files_submitted} files.'
     )
-    logging.info(
-        f'Total download size: {total_file_size / 1024 / 1024:.2f} MB'
-    )
+    logger.info(f'Total download size: {total_file_size / 1024 / 1024:.2f} MB')
 
 
 def download_posts(
@@ -286,4 +284,5 @@ def main_cli() -> None:
 
 
 if __name__ == '__main__':
+    logger.addHandler(logging.StreamHandler())
     main_cli()
