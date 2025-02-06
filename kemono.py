@@ -185,6 +185,10 @@ def get_creator_data(
     creator_id: str,
     service: str,
 ) -> Creator:
+    """Get creator data.
+
+    Result of this function is cached to prevent unnecessary requests.
+    """
     return Creator.from_json(
         httpx.get(
             f'https://kemono.su/api/v1/{service}/user/{creator_id}/profile',
@@ -201,6 +205,7 @@ def get_post_data(
     creator_id: str,
     post_id: str,
 ) -> KemonoPost:
+    """Get kemono.su post data."""
     return KemonoPost.from_json(
         httpx.get(
             f'https://kemono.su/api/v1/{service}/user/{creator_id}/post/{post_id}',
@@ -212,9 +217,10 @@ def get_post_data(
 
 @log_errors
 @tenacity.retry(stop=tenacity.stop_after_attempt(5))
-def download_file(
+def download_attachment(
     attachment: KemonoAttachment,
 ) -> Path:
+    """Download a single post attachment."""
     file_path = attachment.parent_path / attachment.filename
     file_path.parent.mkdir(exist_ok=True, parents=True)
 
@@ -233,6 +239,11 @@ def download_file(
 
 
 def summarize_download(download_tasks: list[Future[Path]]) -> None:
+    """Print download results.
+
+    Prints successful downloads/total downloads and total download size in MB.
+    Outputs to main.log and stdout.
+    """
     total_files_submitted = len(download_tasks)
 
     successful_downloads = [
@@ -255,11 +266,12 @@ def summarize_download(download_tasks: list[Future[Path]]) -> None:
 def download_posts(
     *urls: str,
     thread_count: int = DEFAULT_THREAD_COUNT,
-) -> Iterable[Future[Path]]:
+) -> list[Future[Path]]:
+    """Download posts from kemono.su."""
     posts = (get_post_data(*url.split('/')[3::2]) for url in urls)
     with ThreadPoolExecutor(max_workers=thread_count) as executor:
         attachment_download_tasks = [
-            executor.submit(download_file, attachment)
+            executor.submit(download_attachment, attachment)
             for post in posts
             for attachment in (*post.pictures, *post.file_attachments)
         ]
