@@ -253,7 +253,7 @@ def summarize_download(download_tasks: list[Future[Path]]) -> None:
 
 
 def download_posts(
-    urls: list[str],
+    *urls: str,
     thread_count: int = DEFAULT_THREAD_COUNT,
 ) -> Iterable[Future[Path]]:
     posts = (get_post_data(*url.split('/')[3::2]) for url in urls)
@@ -270,7 +270,7 @@ def download_posts(
 @log_time
 def main_cli() -> None:
     args = construct_argparser().parse_args()
-    summarize_download(download_posts(args.URLS, thread_count=args.threads))
+    summarize_download(download_posts(*args.URLS, thread_count=args.threads))
 
 
 if __name__ == '__main__':
